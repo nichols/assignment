@@ -27,11 +27,13 @@ class ScaledPrefMatrix:
     matrix = [row[1:] for row in pref_list[1:]]
     matrix = [list(i) for i in zip(*matrix)]  # transpose matrix
 
-    # Scale each user's preference row.
-    for row in matrix:
-      row_sum = sum(row)
-      for i in range(len(row)):
-        row[i] /= row_sum
+    # Scale each user's preference row. Also check for all 0s.
+    for i in range(len(matrix)):
+      row_sum = sum(matrix[i])
+      if row_sum == 0:
+        matrix[i] = [1 / len(matrix[i]) for _ in matrix[i]]
+      else:
+        matrix[i] = [x / row_sum for x in matrix[i]]
     return cls(assignee_indices, target_indices, matrix)
 
   def pref(self, assignee, target):
