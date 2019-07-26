@@ -16,18 +16,18 @@ class ScaledPrefMatrix:
     self.matrix = matrix
 
   # pref_list is a table with labels in the first row and first column.
-  # pref_list[0][j] is the name of assignee j
-  # pref_list[i][0] is the name of target i
-  # pref_list[i][j+1] is the preference of assignee j for target i
+  # pref_list[0][j+1] is the name of assignee j
+  # pref_list[i+1][0] is the name of target i
+  # pref_list[i+1][j+1] is the preference of assignee j for target i
   @classmethod
   def from_unscaled_list(cls, pref_list):
     # Python3 dicts remember insertion order.
-    assignee_indices = {v: i for i,v in enumerate(pref_list[0])}
-    target_indices = {v[0]: i for i,v in enumerate(pref_list[1:])}
-    matrix = [row[1:] for row in pref_list[1:]]
+    assignee_indices = dict(zip(pref_list[0][1:], range(len(pref_list[0]))))
+    target_indices = dict(zip((row[0] for row in pref_list[1:]), range(len(pref_list))))
+    matrix = [[cell or 0 for cell in row[1:]] for row in pref_list[1:]]
     matrix = [list(i) for i in zip(*matrix)]  # transpose matrix
 
-    # Scale each user's preference row. Also check for all 0s.
+    # Scale each user's preference row.
     for i in range(len(matrix)):
       row_sum = sum(matrix[i])
       if row_sum == 0:
@@ -61,47 +61,68 @@ class ScaledPrefMatrix:
         graph.add_edge(assignee, target, weight=self.pref(assignee, target))
     return graph
 
-  def to_string(self, col_width=10):
+  def to_string(self, precision=2):
+    first_col_width = max((len(assignee) for assignee in self.assignees))
+    col_width = max([precision + 2] + [len(target) for target in self.targets])
     # header row
-    s = " ".join((x.rjust(col_width) for x in itertools.chain([""], self.targets)))
+    s = "".rjust(first_col_width) + " " + " ".join((x.rjust(col_width) for x in self.targets))
     # add row for each assignee
     for assignee, i in self.assignee_indices.items():
-      s += "\n" + " ".join((x.rjust(col_width)
-                            for x in itertools.chain([assignee], ("{:.2f}".format(r).rjust(col_width)
-                                                                  for r in self.matrix[i]))))
+      s += ("\n{val:>{width}} ".format(val=assignee, width=first_col_width)
+            + " ".join(("{val:>{width}.2f}".format(val=x, width=col_width) for x in self.matrix[i])))
     return s
 
   def __str__(self):
-    return self.to_string(max((len(target) for target in self.targets)))
+    return self.to_string()
 
 
-# Maximum weight matching for a complete weighted bipartite graph.
-def optimal_matching(graph, keys=None):
+# Assignment is a max-weight matching in this complete weighted bipartite graph.
+def assignment_from_graph(graph, keys=None):
   if not keys:
     keys, _ = nx.bipartite.sets(graph)
   matching = nx.algorithms.matching.max_weight_matching(graph, maxcardinality=True)
-  return ((u, v, graph.edges[u, v]['weight']) for u, v in matching)
-
-
-def create_assignment(pref_list):
-  pref_matrix = ScaledPrefMatrix.from_unscaled_list(pref_list)
-  print("Preferences:")
-  print(pref_matrix)
-
-  assignment = optimal_matching(pref_matrix.create_graph(), keys=pref_list[0])
-  total_weight = 0.0
-  print("Optimal assignment:")
-  for row in assignment:
-    print("{}: {} (weight {:.2f})".format(*row))
-    total_weight += row[2]
-  print("Total weight: {:.2f}".format(total_weight))
+  # matching is a set of edges (u,v). nx doesn't know the graph is bipartite, so
+  # there's no consistency in whether the assignee is u or v.
+  assignment = {}
+  for k in keys:
+    # find an edge in the matching containing k
+    edge = next(iter(filter(lambda e: k in e, matching)))
+    v = edge[1] if edge[0] == k else edge[0]
+    assignment[k] = v
+    matching.remove(edge)
   return assignment
 
 
+def assign(pref_list):
+  pref_matrix = ScaledPrefMatrix.from_unscaled_list(pref_list)
+  assignees = pref_matrix.assignees
+  targets = pref_matrix.targets
+  print("Preferences:")
+  print(pref_matrix)
+
+  assignment = assignment_from_graph(pref_matrix.create_graph(), keys=assignees)
+  total_weight = 0.0
+  assignee_col_width = max((len(assignee) for assignee in assignees))
+  print("\nOptimal assignment:")
+  for assignee in assignees:
+    target = assignment[assignee]
+    pref = pref_matrix.pref(assignee, target)
+    print("{}: {} (weight {:.2f})".format(assignee.rjust(assignee_col_width), target, pref))
+    total_weight += pref
+
+  print("\nTotal weight: {:.2f}".format(total_weight))
+  unassigned_targets = set(targets) - set(assignment.values())
+  if unassigned_targets:
+    print("\nUnassigned targets: " + ", ".join(unassigned_targets))
+
+
+def _test_data():
+  return [["", "Foo", "Bar", "Baz"], ["Apple", 0, 1, 1], ["Pear", 2, 0, 0], ["Banana", 1, 2, 2]]
+
+
 def main():
-  # Simple test case
-  pref_list = [["Foo", "Bar", "Baz"], ["Apple", 0, 1, 1], ["Pear", 2, 0, 0], ["Banana", 1, 2, 2]]
-  create_assignment(pref_list)
+  pref_list = _test_data()
+  assign(pref_list)
 
 
 if __name__ == '__main__':
